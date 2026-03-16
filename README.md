@@ -3,7 +3,7 @@
 > **Distribution Growth & Strategy Optimization Workbench**
 > 面向平台业务团队的一体化策略分析 Demo — 问题发现 · 漏斗归因 · 实验设计 · AI 复盘
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://ecommerce-distribution-growth-workbench.streamlit.app)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://ecommerce-distribution-growth-workbench-gu2mup9ggzi9purxpg6iuv.streamlit.app)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
