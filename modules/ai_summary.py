@@ -220,7 +220,12 @@ def _build_group_str(group_results: dict) -> str:
 
 def _call_claude_api(prompt: str, max_tokens: int = 1200) -> str | None:
     """调用 Claude API，失败返回 None。"""
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    # 优先读取 Streamlit Cloud Secrets，其次读取环境变量（本地 .env）
+    try:
+        import streamlit as st
+        api_key = st.secrets.get("ANTHROPIC_API_KEY", "") or os.getenv("ANTHROPIC_API_KEY", "")
+    except Exception:
+        api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if not api_key:
         return None
     try:
