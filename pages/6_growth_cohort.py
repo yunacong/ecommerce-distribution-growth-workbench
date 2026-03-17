@@ -59,12 +59,14 @@ def safe_rate(a, b):
 st.markdown("### 🚀 AARRR 增长指标全景")
 
 # 计算各阶段指标
-# 数据是宽表：impression/click/pay 均为整数标志列（1=发生），pay_amount 为金额，event_date 为日期
+# 数据是聚合宽表：impression/click/pay 均为累计次数列（>0 表示有该行为），pay_amount 为金额
 total_users   = df["user_id"].nunique() if "user_id" in df.columns else len(df)
-imp_users     = df.loc[df["impression"] == 1, "user_id"].nunique() if "impression" in df.columns else total_users
-click_users   = df.loc[df["click"] == 1, "user_id"].nunique() if "click" in df.columns else 0
-pay_users     = df.loc[df["pay"] == 1, "user_id"].nunique() if "pay" in df.columns else 0
-new_users     = df.loc[df["is_new_payer"] == 1, "user_id"].nunique() if "is_new_payer" in df.columns else int(pay_users * 0.35)
+imp_users     = df.loc[df["impression"] > 0, "user_id"].nunique() if "impression" in df.columns else total_users
+click_users   = df.loc[df["click"] > 0, "user_id"].nunique() if "click" in df.columns else 0
+pay_users     = df.loc[df["pay"] > 0, "user_id"].nunique() if "pay" in df.columns else 0
+# is_new_payer 是用户属性列（0/1），需结合 pay>0 才能准确计算新付费用户
+new_users     = df.loc[(df["is_new_payer"] == 1) & (df["pay"] > 0), "user_id"].nunique() \
+                if "is_new_payer" in df.columns else int(pay_users * 0.35)
 gmv_total     = float(df["pay_amount"].sum()) if "pay_amount" in df.columns else 0.0
 
 # AARRR 指标卡
@@ -116,9 +118,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 构建 Cohort 数据（基于支付行为）
-# 宽表结构：pay==1 表示该行发生支付，event_date 为日期列
+# 聚合宽表：pay>0 表示该行有支付行为，event_date 为日期列
 if "pay" in df.columns and "pay_amount" in df.columns and "event_date" in df.columns:
-    df_pay = df[df["pay"] == 1].copy()
+    df_pay = df[df["pay"] > 0].copy()
     df_pay["month"] = pd.to_datetime(df_pay["event_date"]).dt.to_period("M")
 
     if "user_id" in df_pay.columns:
@@ -230,7 +232,7 @@ st.markdown("---")
 st.markdown("### 👥 新客 vs 老客：行为差异对比")
 
 if "is_new_payer" in df.columns and "pay" in df.columns:
-    df_pay2 = df[df["pay"] == 1].copy()
+    df_pay2 = df[df["pay"] > 0].copy()
     new_df  = df_pay2[df_pay2["is_new_payer"] == 1]
     old_df  = df_pay2[df_pay2["is_new_payer"] == 0]
 
@@ -268,7 +270,7 @@ if "is_new_payer" in df.columns and "pay" in df.columns:
 else:
     st.info("数据中未找到 is_new_payer 字段，展示用户类型分布替代。")
     if "user_type" in df.columns and "pay" in df.columns:
-        utype_df = df[df["pay"] == 1].groupby("user_type").agg(
+        utype_df = df[df["pay"] > 0].groupby("user_type").agg(
             pay_count=("pay", "sum"),
             gmv=("pay_amount", "sum"),
         ).reset_index()
