@@ -280,6 +280,97 @@ else:
     st.markdown("</div>", unsafe_allow_html=True)
     st.info("💡 **建议**：整体表现良好时，可深入拆解分群差异，寻找高收益人群和场景进行重点投入。")
 
+# ── SQL 查看器 ────────────────────────────────────────────────────────────────
+st.markdown("### 🖥️ 查看背后的 SQL（DuckDB）")
+st.caption("所有图表均由以下 SQL 计算驱动，可复制到任意支持 DuckDB / 标准 SQL 的环境执行")
+
+sql_tab1, sql_tab2, sql_tab3, sql_tab4 = st.tabs(["核心指标", "趋势分析", "分组对比", "实验组对比"])
+
+with sql_tab1:
+    st.code("""
+-- 核心指标汇总（当前筛选条件下）
+SELECT
+    COUNT(DISTINCT CASE WHEN event_type = 'impression' THEN user_id END)   AS impression_uv,
+    COUNT(DISTINCT CASE WHEN event_type = 'click'      THEN user_id END)   AS click_uv,
+    COUNT(DISTINCT CASE WHEN event_type = 'pay'        THEN user_id END)   AS pay_uv,
+    ROUND(1.0 * SUM(CASE WHEN event_type = 'click' THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN event_type = 'impression' THEN 1 ELSE 0 END), 0), 4) AS ctr,
+    ROUND(1.0 * SUM(CASE WHEN event_type = 'pay' THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN event_type = 'click' THEN 1 ELSE 0 END), 0), 4)    AS cvr,
+    SUM(CASE WHEN event_type = 'pay' THEN order_amount ELSE 0 END)         AS gmv,
+    ROUND(SUM(CASE WHEN event_type = 'pay' THEN order_amount ELSE 0 END)
+         / NULLIF(SUM(campaign_cost), 0), 2)                               AS roi
+FROM distribution_events
+WHERE event_time BETWEEN :start_date AND :end_date
+  AND channel        = :channel        -- 'all' 则不过滤
+  AND user_type      = :user_type      -- 'all' 则不过滤
+  AND experiment_group IN (:groups);
+""", language="sql")
+
+with sql_tab2:
+    st.code("""
+-- 核心指标日趋势
+SELECT
+    DATE(event_time)  AS event_date,
+    ROUND(1.0 * SUM(CASE WHEN event_type = 'click' THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN event_type = 'impression' THEN 1 ELSE 0 END), 0), 4) AS ctr,
+    ROUND(1.0 * SUM(CASE WHEN event_type = 'pay' THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN event_type = 'click' THEN 1 ELSE 0 END), 0), 4)    AS cvr,
+    SUM(CASE WHEN event_type = 'pay' THEN order_amount ELSE 0 END)         AS gmv,
+    ROUND(SUM(CASE WHEN event_type = 'pay' THEN order_amount ELSE 0 END)
+         / NULLIF(SUM(campaign_cost), 0), 2)                               AS roi,
+    ROUND(1.0 * SUM(CASE WHEN is_new_payer = 1 THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN event_type = 'pay' THEN 1 ELSE 0 END), 0), 4)      AS new_user_rate
+FROM distribution_events
+WHERE event_time BETWEEN :start_date AND :end_date
+GROUP BY DATE(event_time)
+ORDER BY event_date;
+""", language="sql")
+
+with sql_tab3:
+    st.code("""
+-- 多维度结构对比（以 channel 为例，替换 channel 字段可切换维度）
+SELECT
+    channel,
+    SUM(CASE WHEN event_type = 'impression' THEN 1 ELSE 0 END) AS impression,
+    SUM(CASE WHEN event_type = 'click'      THEN 1 ELSE 0 END) AS click,
+    SUM(CASE WHEN event_type = 'pay'        THEN 1 ELSE 0 END) AS pay,
+    ROUND(1.0 * SUM(CASE WHEN event_type = 'click' THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN event_type = 'impression' THEN 1 ELSE 0 END), 0), 4) AS ctr,
+    ROUND(1.0 * SUM(CASE WHEN event_type = 'pay' THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN event_type = 'click' THEN 1 ELSE 0 END), 0), 4)    AS cvr,
+    SUM(CASE WHEN event_type = 'pay' THEN order_amount ELSE 0 END)         AS gmv,
+    ROUND(SUM(CASE WHEN event_type = 'pay' THEN order_amount ELSE 0 END)
+         / NULLIF(SUM(campaign_cost), 0), 2)                               AS roi
+FROM distribution_events
+WHERE event_time BETWEEN :start_date AND :end_date
+GROUP BY channel
+ORDER BY gmv DESC;
+-- 可替换 channel 为：user_type / content_type / item_category / price_band
+""", language="sql")
+
+with sql_tab4:
+    st.code("""
+-- A/B 实验组对比（控制组 vs 实验组）
+SELECT
+    experiment_group,
+    COUNT(DISTINCT user_id)                                                 AS total_users,
+    SUM(CASE WHEN event_type = 'impression' THEN 1 ELSE 0 END)             AS impressions,
+    SUM(CASE WHEN event_type = 'click'      THEN 1 ELSE 0 END)             AS clicks,
+    SUM(CASE WHEN event_type = 'pay'        THEN 1 ELSE 0 END)             AS payments,
+    ROUND(1.0 * SUM(CASE WHEN event_type = 'click' THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN event_type = 'impression' THEN 1 ELSE 0 END), 0), 4) AS ctr,
+    ROUND(1.0 * SUM(CASE WHEN event_type = 'pay' THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN event_type = 'impression' THEN 1 ELSE 0 END), 0), 4) AS cvr,
+    SUM(CASE WHEN event_type = 'pay' THEN order_amount ELSE 0 END)         AS gmv,
+    ROUND(SUM(CASE WHEN event_type = 'pay' THEN order_amount ELSE 0 END)
+         / NULLIF(SUM(campaign_cost), 0), 2)                               AS roi
+FROM distribution_events
+WHERE event_time BETWEEN :start_date AND :end_date
+GROUP BY experiment_group
+ORDER BY experiment_group;
+""", language="sql")
+
 # ── 底部风险提醒 ──────────────────────────────────────────────────────────────
 with st.expander("⚠️ 使用说明与风险提醒"):
     st.markdown("""

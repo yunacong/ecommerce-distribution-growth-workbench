@@ -255,3 +255,82 @@ with st.expander("📊 展开：流量场景 × 漏斗指标热力图"):
         from modules.chart_builder import build_heatmap
         fig = build_heatmap(pivot, title="场景 × 漏斗指标热力图", height=300, fmt=".2%")
         st.plotly_chart(fig, use_container_width=True)
+
+# ── SQL 查看器 ────────────────────────────────────────────────────────────────
+st.markdown("---")
+st.markdown("### 🖥️ 查看背后的 SQL（DuckDB）")
+st.caption("漏斗各环节均由以下 SQL 逻辑计算，可在任意 SQL 环境复现")
+
+fsql1, fsql2, fsql3 = st.tabs(["漏斗转化率", "分组漏斗对比", "问题定位 SQL"])
+
+with fsql1:
+    st.code("""
+-- 六层漏斗转化率（Impression → Click → Detail → Cart → Order → Pay）
+SELECT
+    SUM(CASE WHEN event_type = 'impression' THEN 1 ELSE 0 END) AS impression,
+    SUM(CASE WHEN event_type = 'click'      THEN 1 ELSE 0 END) AS click,
+    SUM(CASE WHEN event_type = 'detail'     THEN 1 ELSE 0 END) AS detail_view,
+    SUM(CASE WHEN event_type = 'cart'       THEN 1 ELSE 0 END) AS add_to_cart,
+    SUM(CASE WHEN event_type = 'order'      THEN 1 ELSE 0 END) AS order_cnt,
+    SUM(CASE WHEN event_type = 'pay'        THEN 1 ELSE 0 END) AS pay,
+    -- 层间转化率
+    ROUND(1.0 * SUM(CASE WHEN event_type='click'  THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN event_type='impression' THEN 1 ELSE 0 END),0),4) AS ctr,
+    ROUND(1.0 * SUM(CASE WHEN event_type='detail' THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN event_type='click'      THEN 1 ELSE 0 END),0),4) AS click_to_detail,
+    ROUND(1.0 * SUM(CASE WHEN event_type='cart'   THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN event_type='detail'     THEN 1 ELSE 0 END),0),4) AS detail_to_cart,
+    ROUND(1.0 * SUM(CASE WHEN event_type='order'  THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN event_type='cart'       THEN 1 ELSE 0 END),0),4) AS cart_to_order,
+    ROUND(1.0 * SUM(CASE WHEN event_type='pay'    THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN event_type='order'      THEN 1 ELSE 0 END),0),4) AS order_to_pay
+FROM distribution_events
+WHERE event_time BETWEEN :start_date AND :end_date;
+""", language="sql")
+
+with fsql2:
+    st.code("""
+-- 按流量场景拆解漏斗（识别哪个场景转化最差）
+SELECT
+    channel,
+    ROUND(1.0 * SUM(CASE WHEN event_type='click'  THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN event_type='impression' THEN 1 ELSE 0 END),0),4) AS ctr,
+    ROUND(1.0 * SUM(CASE WHEN event_type='cart'   THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN event_type='detail'     THEN 1 ELSE 0 END),0),4) AS detail_to_cart,
+    ROUND(1.0 * SUM(CASE WHEN event_type='pay'    THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN event_type='impression' THEN 1 ELSE 0 END),0),4) AS overall_cvr,
+    SUM(CASE WHEN event_type='pay' THEN order_amount ELSE 0 END)                       AS gmv
+FROM distribution_events
+WHERE event_time BETWEEN :start_date AND :end_date
+GROUP BY channel
+ORDER BY overall_cvr DESC;
+-- 替换 channel 为 user_type / content_type 可切换维度
+""", language="sql")
+
+with fsql3:
+    st.code("""
+-- 自动定位最大掉点环节
+WITH funnel AS (
+    SELECT
+        SUM(CASE WHEN event_type='impression' THEN 1 ELSE 0 END) AS s1,
+        SUM(CASE WHEN event_type='click'      THEN 1 ELSE 0 END) AS s2,
+        SUM(CASE WHEN event_type='detail'     THEN 1 ELSE 0 END) AS s3,
+        SUM(CASE WHEN event_type='cart'       THEN 1 ELSE 0 END) AS s4,
+        SUM(CASE WHEN event_type='order'      THEN 1 ELSE 0 END) AS s5,
+        SUM(CASE WHEN event_type='pay'        THEN 1 ELSE 0 END) AS s6
+    FROM distribution_events
+    WHERE event_time BETWEEN :start_date AND :end_date
+),
+rates AS (
+    SELECT
+        '曝光→点击'   AS stage, ROUND(1.0*s2/NULLIF(s1,0),4) AS conv_rate FROM funnel
+    UNION ALL SELECT '点击→详情',   ROUND(1.0*s3/NULLIF(s2,0),4) FROM funnel
+    UNION ALL SELECT '详情→加购',   ROUND(1.0*s4/NULLIF(s3,0),4) FROM funnel
+    UNION ALL SELECT '加购→下单',   ROUND(1.0*s5/NULLIF(s4,0),4) FROM funnel
+    UNION ALL SELECT '下单→支付',   ROUND(1.0*s6/NULLIF(s5,0),4) FROM funnel
+)
+SELECT stage, conv_rate,
+       RANK() OVER (ORDER BY conv_rate ASC) AS drop_rank  -- rank=1 为最大掉点
+FROM rates
+ORDER BY conv_rate ASC;
+""", language="sql")
