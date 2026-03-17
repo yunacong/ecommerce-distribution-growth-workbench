@@ -74,14 +74,15 @@ else:
 
 def calc_group_stats(d):
     """计算某分组的核心指标"""
-    n_imp = (d["event_type"] == "impression").sum() if "event_type" in d.columns else len(d)
-    n_click = (d["event_type"] == "click").sum() if "event_type" in d.columns else 0
-    n_pay  = (d["event_type"] == "pay").sum() if "event_type" in d.columns else 0
-    gmv    = d.loc[d["event_type"] == "pay", "order_amount"].sum() if "order_amount" in d.columns else 0
-    cost   = d["campaign_cost"].sum() if "campaign_cost" in d.columns else 0
-    ctr    = n_click / n_imp if n_imp > 0 else 0
-    cvr    = n_pay / n_imp if n_imp > 0 else 0
-    aov    = gmv / n_pay if n_pay > 0 else 0
+    # 数据是宽表：impression/click/pay 均为整数标志列，pay_amount 为金额列
+    n_imp   = int(d["impression"].sum())   if "impression"   in d.columns else len(d)
+    n_click = int(d["click"].sum())        if "click"        in d.columns else 0
+    n_pay   = int(d["pay"].sum())          if "pay"          in d.columns else 0
+    gmv     = float(d["pay_amount"].sum()) if "pay_amount"   in d.columns else 0.0
+    cost    = float(d["campaign_cost"].sum()) if "campaign_cost" in d.columns else 0.0
+    ctr     = n_click / n_imp if n_imp > 0 else 0
+    cvr     = n_pay   / n_imp if n_imp > 0 else 0
+    aov     = gmv     / n_pay if n_pay > 0 else 0
     return {
         "impression": n_imp, "click": n_click, "pay": n_pay,
         "gmv": gmv, "cost": cost, "ctr": ctr, "cvr": cvr, "aov": aov
@@ -247,10 +248,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 if "user_type" in df.columns:
-    user_grp = df.groupby(["user_type"]).agg(
-        impression=("event_type", lambda x: (x == "impression").sum()),
-        pay=("event_type", lambda x: (x == "pay").sum()),
-        gmv=("order_amount", "sum") if "order_amount" in df.columns else ("event_type", "count"),
+    # 宽表结构：impression/click/pay 是整数标志列，pay_amount 是金额列
+    user_grp = df.groupby("user_type").agg(
+        impression=("impression", "sum"),
+        pay=("pay", "sum"),
+        gmv=("pay_amount", "sum"),
     ).reset_index()
     user_grp["cvr"] = user_grp["pay"] / user_grp["impression"].replace(0, np.nan)
 

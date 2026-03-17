@@ -59,12 +59,13 @@ def safe_rate(a, b):
 st.markdown("### 🚀 AARRR 增长指标全景")
 
 # 计算各阶段指标
+# 数据是宽表：impression/click/pay 均为整数标志列（1=发生），pay_amount 为金额，event_date 为日期
 total_users   = df["user_id"].nunique() if "user_id" in df.columns else len(df)
-imp_users     = df.loc[df["event_type"] == "impression", "user_id"].nunique() if "event_type" in df.columns else total_users
-click_users   = df.loc[df["event_type"] == "click", "user_id"].nunique() if "event_type" in df.columns else 0
-pay_users     = df.loc[df["event_type"] == "pay", "user_id"].nunique() if "event_type" in df.columns else 0
-new_users     = df.loc[(df["event_type"] == "pay") & (df.get("is_new_payer", pd.Series(0)) == 1), "user_id"].nunique() if "is_new_payer" in df.columns else int(pay_users * 0.35)
-gmv_total     = df.loc[df["event_type"] == "pay", "order_amount"].sum() if "order_amount" in df.columns else 0
+imp_users     = df.loc[df["impression"] == 1, "user_id"].nunique() if "impression" in df.columns else total_users
+click_users   = df.loc[df["click"] == 1, "user_id"].nunique() if "click" in df.columns else 0
+pay_users     = df.loc[df["pay"] == 1, "user_id"].nunique() if "pay" in df.columns else 0
+new_users     = df.loc[df["is_new_payer"] == 1, "user_id"].nunique() if "is_new_payer" in df.columns else int(pay_users * 0.35)
+gmv_total     = float(df["pay_amount"].sum()) if "pay_amount" in df.columns else 0.0
 
 # AARRR 指标卡
 aarrr_cols = st.columns(5)
@@ -115,10 +116,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 构建 Cohort 数据（基于支付行为）
-if "event_type" in df.columns and "order_amount" in df.columns and "event_time" in df.columns:
-    df_pay = df[df["event_type"] == "pay"].copy()
-    df_pay["event_time"] = pd.to_datetime(df_pay["event_time"])
-    df_pay["month"] = df_pay["event_time"].dt.to_period("M")
+# 宽表结构：pay==1 表示该行发生支付，event_date 为日期列
+if "pay" in df.columns and "pay_amount" in df.columns and "event_date" in df.columns:
+    df_pay = df[df["pay"] == 1].copy()
+    df_pay["month"] = pd.to_datetime(df_pay["event_date"]).dt.to_period("M")
 
     if "user_id" in df_pay.columns:
         # 首次支付月 = Cohort 月
@@ -205,8 +206,8 @@ else:
 st.markdown("---")
 st.markdown("### 👥 新客 vs 老客：行为差异对比")
 
-if "is_new_payer" in df.columns and "event_type" in df.columns:
-    df_pay2 = df[df["event_type"] == "pay"].copy()
+if "is_new_payer" in df.columns and "pay" in df.columns:
+    df_pay2 = df[df["pay"] == 1].copy()
     new_df  = df_pay2[df_pay2["is_new_payer"] == 1]
     old_df  = df_pay2[df_pay2["is_new_payer"] == 0]
 
@@ -216,7 +217,7 @@ if "is_new_payer" in df.columns and "event_type" in df.columns:
         (col_old, "🔄 老客", old_df, "#27AE60")
     ]:
         n     = len(d)
-        avg_aov = d["order_amount"].mean() if "order_amount" in d.columns else 0
+        avg_aov = d["pay_amount"].mean() if "pay_amount" in d.columns else 0
         with col:
             st.markdown(f"""
             <div class="growth-card" style="border-top-color:{color};">
@@ -227,8 +228,8 @@ if "is_new_payer" in df.columns and "event_type" in df.columns:
             """, unsafe_allow_html=True)
 
     # 日期趋势：新老用户支付数对比
-    if "event_time" in df.columns:
-        df_pay2["date"] = pd.to_datetime(df_pay2["event_time"]).dt.date
+    if "event_date" in df.columns:
+        df_pay2["date"] = pd.to_datetime(df_pay2["event_date"]).dt.date
         daily = df_pay2.groupby(["date", "is_new_payer"]).size().reset_index(name="pay_count")
         daily["用户类型"] = daily["is_new_payer"].map({1: "新客", 0: "老客"})
 
@@ -243,10 +244,10 @@ if "is_new_payer" in df.columns and "event_type" in df.columns:
         st.plotly_chart(fig_nu, use_container_width=True)
 else:
     st.info("数据中未找到 is_new_payer 字段，展示用户类型分布替代。")
-    if "user_type" in df.columns:
-        utype_df = df[df["event_type"] == "pay"].groupby("user_type").agg(
-            pay_count=("event_type", "count"),
-            gmv=("order_amount", "sum") if "order_amount" in df.columns else ("event_type", "count")
+    if "user_type" in df.columns and "pay" in df.columns:
+        utype_df = df[df["pay"] == 1].groupby("user_type").agg(
+            pay_count=("pay", "sum"),
+            gmv=("pay_amount", "sum"),
         ).reset_index()
         fig_ut = px.bar(utype_df, x="user_type", y="pay_count",
                         title="各用户类型支付量", height=320,
