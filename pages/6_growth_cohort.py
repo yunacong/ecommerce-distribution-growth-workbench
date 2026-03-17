@@ -134,10 +134,32 @@ if "pay" in df.columns and "pay_amount" in df.columns and "event_date" in df.col
         cohort_pivot = df_cohort.groupby(["cohort_month", "period_number"])["user_id"].nunique().reset_index()
         cohort_wide  = cohort_pivot.pivot(index="cohort_month", columns="period_number", values="user_id")
 
+        # ── 若实际数据只有 M+0（无跨月复购），用真实队列规模 + 典型衰减曲线生成演示数据 ──
+        if len(cohort_wide.columns) <= 1:
+            st.info("ℹ️ 模拟数据每用户单月支付，下方基于真实队列规模模拟典型电商留存曲线（演示用）")
+            # 典型电商月留存衰减：100% → 42% → 27% → 18% → 12% → 8%
+            # 按 cohort 月份给轻微差异，体现产品迭代效果
+            base_decay  = [1.0, 0.42, 0.27, 0.18, 0.12, 0.08]
+            cohort_offsets = {str(m): i * 0.02 for i, m in enumerate(cohort_wide.index)}
+            cohort_sizes_real = cohort_wide.iloc[:, 0]
+
+            demo_rows = {}
+            for cm in cohort_sizes_real.index:
+                cm_str = str(cm)
+                base_n = int(cohort_sizes_real[cm])
+                off    = cohort_offsets.get(cm_str, 0)
+                row    = {}
+                for p, rate in enumerate(base_decay):
+                    adj_rate = min(1.0, rate + (off if p > 0 else 0))
+                    row[p]   = round(base_n * adj_rate)
+                demo_rows[cm_str] = row
+            cohort_wide = pd.DataFrame(demo_rows).T
+            cohort_wide.index.name = "cohort_month"
+
         # 归一化为留存率
-        cohort_size  = cohort_wide[0]
-        retention    = cohort_wide.divide(cohort_size, axis=0)
-        retention    = retention.loc[:, retention.columns <= 5]  # 最多展示 6 期
+        cohort_size = cohort_wide[0]
+        retention   = cohort_wide.divide(cohort_size, axis=0)
+        retention   = retention.loc[:, retention.columns <= 5]  # 最多展示 6 期
 
         # 热力图
         ret_labels = [f"M+{c}" if c > 0 else "首月" for c in retention.columns]
@@ -175,12 +197,13 @@ if "pay" in df.columns and "pay_amount" in df.columns and "event_date" in df.col
                     y=valid.values * 100,
                     mode="lines+markers",
                     name=str(month_idx),
-                    line=dict(width=1.5),
-                    marker=dict(size=5),
+                    line=dict(width=2),
+                    marker=dict(size=6),
                 ))
         fig_ret_line.update_layout(
             title="各 Cohort 留存曲线（%）",
             xaxis_title="距首购月份", yaxis_title="留存率（%）",
+            yaxis=dict(range=[0, 105]),
             height=340, plot_bgcolor="white",
             legend=dict(title="Cohort月"), margin=dict(t=40, b=30)
         )
